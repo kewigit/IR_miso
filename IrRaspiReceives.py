@@ -33,10 +33,13 @@ gap        gap in milliseconds between transmitted codes, default 100 ms
 
 import time
 import requests
-import json
+from servo import *
+import concurrent.futures
 
-# import Adafruit_PCA9685
+import Adafruit_PCA9685
 import pigpio  # http://abyz.co.uk/rpi/pigpio/python.html
+
+pwm = Adafruit_PCA9685.PCA9685()
 
 GPIO = 18           #GPIO18
 #CHANGED: デフォルト波形を300 → 100
@@ -61,7 +64,8 @@ last_tick = 0
 in_code = False
 code = []
 fetching_code = False
-
+servo_min = 150
+servo_max = 600
 # sendHit?id=25005&hit=ヒット数
 
 def carrier(gpio, frequency, micros):
@@ -191,7 +195,34 @@ cb = pi.callback(GPIO, pigpio.EITHER_EDGE, cbf) # GPIO18ピンにエッジが検
 #TODO: 適切な距波形を計算する
 #TODO: 的をサーボモータで制御
 #IR受信 メイン処理
-if __name__ == "__main__":
+def pwm_driver_test(config_data):
+    pwm = SupportServoDriver(config_data=config_data)
+
+    while True:
+        # [チャンネル : 角度] の形式で入力を受け付ける。チャンネルに[all]と入力すると全てに出力する。
+        data = input()
+        data = data.split(':')
+
+        channel = data[0]
+        angle = data[1]
+
+        if channel == 'all':
+            print('[Receive]')
+            print('channel : all')
+            print('angle : {0}\n'.format(angle))
+
+            # 接続されているサーボすべてを中心位置（ホーム）にする
+            for i in range(0, 16):
+                pwm.to_angle(i, int(angle))
+
+        else:
+            print('[Receive]')
+            print('channel : {0}'.format(channel))
+            print('angle : {0}\n'.format(angle))
+
+            pwm.to_angle(int(channel), int(angle))
+
+def ir_receive():
 
     hitcount = 0 #IR受信数をカウント
 
@@ -209,7 +240,7 @@ if __name__ == "__main__":
          req = requests.get(url)
          notice = req.json()
          print("notice", notice)   #デバック用
-         time.sleep(1)
+         time.sleep(0.5)
 
        if notice["Flg"] == True:
            #hitcount -= 1
@@ -217,22 +248,28 @@ if __name__ == "__main__":
            hit = 'http://192.168.1.171:9999/sendHit?id=25005&hit={}'.format(hitcount)
            requests.get(hit)
            print(hit)
-           time.sleep(1)
-           exit(0)
+           url = 'http://192.168.1.171:9999/sendNotice?id=25008'
+           req = requests.get(url)
+           time.sleep(0.5)
+
 
        print("Okay")
        #print("ferching", fetching_code)
-       time.sleep(1)
+       time.sleep(0.5)
 
        if CONFIRM:
            press_1 = code[:]
            done = False
 
        else:  # No confirm.
-           print("赤外線検知")
            hitcount += 1
            print("Hit COUNT", hitcount)
 
 pi.set_glitch_filter(GPIO, 0)  # フィルター 無効.
 pi.set_watchdog(GPIO, 0)  # watchdog キャンセル.
 pi.stop()  # pigpio stop
+
+if __name__ == "__main__":
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+    executor.submit(ir_receive())
+    executor.submit(pwm_driver_test())
